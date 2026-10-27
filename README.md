@@ -2,7 +2,20 @@
 
 A local-first blackboard animation editor. Draw a story, time its strokes to a voiceover, and export a 1920×1080 video. No account, API key, backend, or runtime dependencies.
 
-## Run
+## Use online with GitHub Pages
+
+No installation or local server is needed. The entire editor, including audio processing and video export, runs in your browser.
+
+One-time repository setup:
+
+1. Open [Settings → Pages](https://github.com/IngiRG/blackboard/settings/pages).
+2. Under **Build and deployment**, select **Deploy from a branch**.
+3. Choose **main** and **/(root)**, then click **Save**.
+4. Once GitHub finishes deploying, open **https://ingirg.github.io/blackboard/**.
+
+The repository includes `.nojekyll` for plain static publishing. Changes pushed to `main` will be published automatically after Pages is enabled. Audio and drawings remain on your device; save project files to keep your work. The online version has the same browser/export requirements described below.
+
+## Run locally (optional)
 
 Requires Node.js 20 or newer:
 
