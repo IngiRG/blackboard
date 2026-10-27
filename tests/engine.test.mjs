@@ -1,0 +1,10 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {samples,smoothPoints,progress,setTiming,validateProject} from '../src/engine.js';
+const stroke=()=>({points:[{x:0,y:0},{x:100,y:100}],color:'#ffffff',width:5,smoothing:.55,texture:.65,start:0,end:1});
+test('reveal advances by path length and clamps to endpoints',()=>{const s=stroke();assert.equal(progress(s,-1),0);assert.equal(progress(s,.5),.5);assert.equal(progress(s,2),1);const p=samples([{x:0,y:0},{x:3,y:4}]);assert.equal(p.at(-1).distance,5);assert.deepEqual([p.at(-1).x,p.at(-1).y],[3,4]);});
+test('smoothing preserves endpoints and reduces a sharp turn',()=>{const p=[{x:0,y:0},{x:20,y:50},{x:100,y:0}];const out=smoothPoints(p,.8);assert.deepEqual(out[0],p[0]);assert.deepEqual(out.at(-1),p.at(-1));assert.ok(out[1].y<50);assert.deepEqual(smoothPoints(p,0),p);});
+test('editing earlier stroke ripples later timing while preserving duration',()=>{const ss=[stroke(),{...stroke(),start:2,end:4},{...stroke(),start:5,end:6}];setTiming(ss,0,1,5);assert.deepEqual(ss.map(s=>[s.start,s.end]),[[1,5],[5,7],[7,8]]);setTiming(ss,1,0,0);assert.equal(ss[1].start,5);assert.ok(ss[1].end>5);});
+test('project validates roundtrip and rejects malformed or unordered data',()=>{const p={version:1,background:'#203631',duration:10,strokes:[stroke()],audio:null};assert.deepEqual(validateProject(JSON.parse(JSON.stringify(p))),p);for(const bad of [{...p,background:'red'},{...p,strokes:[{...stroke(),width:NaN}]},{...p,strokes:[stroke(),stroke()]},{...p,audio:{name:'bad',data:'javascript:alert(1)'}}])assert.throws(()=>validateProject(bad));});
+test('single point strokes have a drawable sample',()=>{assert.equal(samples([{x:3,y:4}]).length,1);});
+test('timing overflow is rejected without changing the project',()=>{const ss=[stroke(),{...stroke(),start:2,end:4}];const original=JSON.stringify(ss);assert.throws(()=>setTiming(ss,0,3598,3600));assert.equal(JSON.stringify(ss),original);});

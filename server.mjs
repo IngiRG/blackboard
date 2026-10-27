@@ -1,0 +1,4 @@
+import http from 'node:http';
+import {readFile} from 'node:fs/promises';
+const files={'/':'index.html','/index.html':'index.html','/src/app.js':'src/app.js','/src/engine.js':'src/engine.js','/src/style.css':'src/style.css'};
+http.createServer(async(req,res)=>{try{const path=files[new URL(req.url,'http://localhost').pathname];if(!path)throw Error();const body=await readFile(new URL(path,import.meta.url));res.setHeader('Content-Type',path.endsWith('.html')?'text/html; charset=utf-8':path.endsWith('.css')?'text/css':'text/javascript');res.setHeader('X-Content-Type-Options','nosniff');res.end(body);}catch{res.writeHead(404);res.end('Not found');}}).listen(process.env.PORT||3000,()=>console.log(`Blackboard Studio: http://localhost:${process.env.PORT||3000}`));

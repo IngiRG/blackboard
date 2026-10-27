@@ -1,0 +1,4 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+test('server serves editor assets and denies private files',async()=>{const child=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:'3019'},stdio:['ignore','pipe','pipe']});try{await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error(`Server exited ${code}`)));});for(const path of ['/','/src/app.js','/src/engine.js','/src/style.css']){const r=await fetch('http://localhost:3019'+path);assert.equal(r.status,200);assert.ok((await r.text()).length>100);}for(const path of ['/.git/config','/package.json','/missing'])assert.equal((await fetch('http://localhost:3019'+path)).status,404);}finally{child.kill();}});
