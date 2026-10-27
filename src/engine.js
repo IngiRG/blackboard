@@ -5,5 +5,48 @@ export function samples(points){if(!points.length)return [];let out=[{...points[
 export function progress(stroke,time){return clamp((time-stroke.start)/(stroke.end-stroke.start),0,1);}
 export function setTiming(strokes,index,start,end){const previous=index?strokes[index-1].end:0;start=Math.max(previous,Number(start)||0);end=Math.max(start+.05,Number(end)||0);let tail=end;for(let i=index+1;i<strokes.length;i++)tail=Math.max(tail,strokes[i].start)+(strokes[i].end-strokes[i].start);if(tail>3600)throw Error('The sequence cannot exceed one hour.');strokes[index].start=start;strokes[index].end=end;for(let i=index+1;i<strokes.length;i++){if(strokes[i].start<strokes[i-1].end){const d=strokes[i].end-strokes[i].start;strokes[i].start=strokes[i-1].end;strokes[i].end=strokes[i].start+d;}}}
 function random(seed){let n=Math.imul(seed^0x9e3779b9,0x85ebca6b);n^=n>>>13;return(n>>>0)/4294967296;}
-export function drawStroke(ctx,stroke,fraction=1){if(fraction<=0)return;const pts=stroke.samples||samples(smoothPoints(stroke.points,stroke.smoothing));if(!pts.length)return;const limit=pts.at(-1).distance*fraction;ctx.fillStyle=stroke.color;for(let i=0;i<pts.length;i++){const p=pts[i];if(p.distance>limit)break;ctx.globalAlpha=1-stroke.texture*.55;ctx.beginPath();ctx.arc(p.x,p.y,stroke.width/2,0,Math.PI*2);ctx.fill();if(stroke.texture>0){ctx.globalAlpha=stroke.texture*.45;for(let j=0;j<4;j++){const angle=random(i*13+j*37)*Math.PI*2,r=Math.sqrt(random(i*29+j*71))*stroke.width*.65;ctx.beginPath();ctx.arc(p.x+Math.cos(angle)*r,p.y+Math.sin(angle)*r,.35+random(i*17+j)*stroke.width*.08,0,Math.PI*2);ctx.fill();}}}ctx.globalAlpha=1;}
+// Find the exclusive reveal boundary without scanning the already-painted prefix.
+export function visibleSampleCount(pts, fraction) {
+  if (!pts.length || fraction <= 0) return 0;
+  if (fraction >= 1) return pts.length;
+  const limit = pts.at(-1).distance * fraction;
+  let low = 0, high = pts.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (pts[mid].distance <= limit) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+// Absolute sample indices keep the grain identical across incremental frames.
+export function drawSamples(ctx, stroke, pts, from = 0, to = pts.length, seedOffset = 0) {
+  if (from >= to) return;
+  ctx.fillStyle = stroke.color;
+  for (let index = from; index < to; index++) {
+    const p = pts[index], i = index + seedOffset;
+    ctx.globalAlpha = 1 - stroke.texture * .55;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, stroke.width / 2, 0, Math.PI * 2);
+    ctx.fill();
+    if (stroke.texture > 0) {
+      ctx.globalAlpha = stroke.texture * .45;
+      for (let j = 0; j < 4; j++) {
+        const angle = random(i * 13 + j * 37) * Math.PI * 2;
+        const r = Math.sqrt(random(i * 29 + j * 71)) * stroke.width * .65;
+        ctx.beginPath();
+        ctx.arc(p.x + Math.cos(angle) * r, p.y + Math.sin(angle) * r,
+          .35 + random(i * 17 + j) * stroke.width * .08, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+export function drawStroke(ctx, stroke, fraction = 1) {
+  if (fraction <= 0) return;
+  const pts = stroke.samples || samples(smoothPoints(stroke.points, stroke.smoothing));
+  drawSamples(ctx, stroke, pts, 0, visibleSampleCount(pts, fraction));
+}
 export function validateProject(data){if(data?.version!==1||!Array.isArray(data.strokes)||data.strokes.length>10000)throw Error('Not a supported Blackboard project.');if(!/^#[0-9a-f]{6}$/i.test(data.background)||!Number.isFinite(data.duration)||data.duration<1||data.duration>3600)throw Error('Invalid project settings.');let last=0,total=0;for(const s of data.strokes){if(!Array.isArray(s.points)||!s.points.length||(total+=s.points.length)>1000000||!/^#[0-9a-f]{6}$/i.test(s.color)||!Number.isFinite(s.width)||s.width<1||s.width>40||!Number.isFinite(s.smoothing)||s.smoothing<0||s.smoothing>.95||!Number.isFinite(s.texture)||s.texture<0||s.texture>1||!Number.isFinite(s.start)||!Number.isFinite(s.end)||s.start<last||s.end-s.start<.049||s.end>3600||s.points.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.x>W||p.y<0||p.y>H))throw Error('Invalid stroke data.');last=s.end;}if(data.audio&&(!/^data:audio\/[a-z0-9.+-]+;base64,[a-z0-9+/=]*$/i.test(data.audio.data)||typeof data.audio.name!=='string'))throw Error('Invalid embedded audio.');return data;}

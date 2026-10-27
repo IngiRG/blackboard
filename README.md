@@ -44,7 +44,7 @@ npm test
 npm run check
 ```
 
-Tests cover arc-length reveal sampling, smoothing endpoints, ordered timing/ripple behavior, bounds, project validation, and static-server routing. Optional browser integration checks:
+Tests cover arc-length reveal sampling, smoothing endpoints, ordered timing/ripple behavior, bounds, project validation, and static-server routing. Rendering regression tests compare incremental paint operations with full redraws, including texture, rewind, mode changes, edits, and live smoothing. Operation-count tests ensure completed strokes are not repainted and forward animation paints each sample only once, regardless of frame count. Optional browser integration checks:
 
 ```sh
 npm install --no-save playwright
@@ -57,8 +57,15 @@ The browser check exercises drawing, undo/redo, timing, playback, project round-
 ## Structure
 
 - `src/engine.js`: deterministic chalk rendering, smoothing, arc-length sampling, timing constraints, project validation.
+- `src/renderer.js`: bounded canvas caches, incremental live smoothing and animation, and frame-coalesced pointer rendering.
 - `src/app.js`: pointer input, editor controls, Web Audio playback, waveform, project I/O, and MediaRecorder export.
 - `src/style.css`: responsive studio layout.
 - `server.mjs`: dependency-free local static server, serving only application assets.
 
 Rendering uses a fixed 1920×1080 coordinate system. The same stroke renderer drives the editor and exported frames. AudioContext time is the common clock for preview and export. Textured strokes use deterministic grain so their texture stays stable across frames. Export uses an independent canvas and a Web Audio media destination; the include-audio setting determines whether an audio track is added.
+
+## Rendering performance
+
+Finished strokes are cached on a single full-HD backing canvas. Moving the pointer does not repaint previous strokes, and adding a stroke extends the cached drawing. Live drawing smooths only newly collected points, keeps the stable prefix, and redraws only the changing endpoint. Pointer events are collected at their original frequency but painted at most once per animation frame.
+
+Preview and export each have an independent incremental renderer. Forward playback adds only newly revealed chalk samples; it does not repaint completed strokes or the already-visible part of the current stroke. Backward seeks, destructive edits, and background/mode changes rebuild the affected cache. The cache uses a fixed number of canvases rather than allocating one full-HD canvas per stroke. Drawing geometry, deterministic texture, project compatibility, audio timing, and export resolution are preserved. Actual frame rate still depends on your browser and hardware; automated operation-count tests are not a browser FPS benchmark.
