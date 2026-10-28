@@ -15,20 +15,26 @@ const wav=Buffer.alloc(44+44100*2);wav.write('RIFF');wav.writeUInt32LE(wav.lengt
 await page.locator('#audio-file').setInputFiles({name:'tone.wav',mimeType:'audio/wav',buffer:wav});await page.waitForFunction(()=>!document.getElementById('remove-audio').hidden);for(const sound of [false,true]){await page.locator('#export').click();await page.locator('#with-audio').setChecked(sound);await page.locator('#start-export').click();await page.locator('#download').waitFor({state:'visible',timeout:15000});const result=await page.evaluate(async()=>{const blob=await(await fetch(document.getElementById('download').href)).blob();return{size:blob.size,type:blob.type};});assert.ok(result.size>1000);assert.match(result.type,/video\/webm/);await page.locator('.close').click();}
 // Continuous mode: a break freezes the drawing halfway through a stroke.
 await page.locator('#timing-mode').selectOption('continuous');
-await page.locator('#drawing-duration').fill('4');
-await page.locator('#drawing-duration').dispatchEvent('change');
+await page.locator('#animation-end').fill('4');
+await page.locator('#animation-end').dispatchEvent('change');
 async function seekTo(value) {
   await page.locator('#seek').fill(String(value));
   await page.locator('#seek').dispatchEvent('input');
 }
+await seekTo(.5);
+await page.locator('#set-animation-start').click();
+assert.equal(await page.locator('#animation-start').inputValue(),'0.50');
+await seekTo(4);
+await page.locator('#set-animation-end').click();
 await seekTo(1);
+const beforeBreak=await page.locator('#board').evaluate(canvas=>canvas.toDataURL());
 await page.locator('#add-break').click();
 await page.getByLabel('Break 1 resume').fill('3');
 await page.getByLabel('Break 1 resume').dispatchEvent('change');
-assert.equal(await page.locator('#duration').inputValue(),'6.00');
+assert.equal(await page.locator('#duration').inputValue(),'4.00');
 assert.equal(await page.locator('.break-marker').count(),1);
 const pixels=()=>page.locator('#board').evaluate(canvas=>canvas.toDataURL());
-await seekTo(1);const held=await pixels();
+await seekTo(1);const held=await pixels();assert.equal(held,beforeBreak);
 await seekTo(2);assert.equal(await pixels(),held);
 await seekTo(3);assert.equal(await pixels(),held);
 await seekTo(3.5);assert.notEqual(await pixels(),held);
@@ -42,6 +48,8 @@ page.once('dialog',dialog=>dialog.accept());
 await page.locator('#project-file').setInputFiles(await continuousProject.path());
 await page.waitForFunction(()=>document.getElementById('timing-mode').value==='continuous');
 assert.equal(await page.getByLabel('Break 1 resume').inputValue(),'3.00');
+assert.equal(await page.locator('#animation-start').inputValue(),'0.50');
+assert.equal(await page.locator('#animation-end').inputValue(),'4.00');
 await seekTo(2);assert.equal(await pixels(),held);
 await page.locator('#export').click();
 await page.locator('#start-export').click();

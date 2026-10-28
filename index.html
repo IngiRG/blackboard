@@ -7,10 +7,12 @@
 <label class="timing-select">Animation mode<select id="timing-mode"><option value="stroke">Per stroke</option><option value="continuous">Continuous</option></select></label>
 <p id="timing-help" class="muted">Strokes reveal in drawing order. Set a start and end, or use the playhead.</p>
 <section id="continuous-panel" hidden>
-<label class="drawing-duration">Drawing time <span>(without breaks)</span><div><input id="drawing-duration" type="number" min="0.1" max="3600" step="0.1" value="10"> seconds</div></label>
-<p class="muted">Lower drawing time = faster reveal. Breaks extend the video; your audio keeps playing.</p>
+<div class="times window-times"><label>START · seconds<input id="animation-start" type="number" min="0" max="3600" step="0.05" value="0" aria-label="Animation start"></label><label>END · seconds<input id="animation-end" type="number" min="0.05" max="3600" step="0.05" value="10" aria-label="Animation end"></label></div>
+<div class="cue-buttons"><button id="set-animation-start">Set start here</button><button id="set-animation-end">Set end here</button></div>
+<p class="muted">Scrub the audio and set the start and end. Drawing speed adapts around your breaks to finish at that exact end.</p>
+<p id="drawing-time-summary" class="muted"></p>
 <button id="add-break">＋ Add break at playhead</button><p id="break-state" role="status"></p>
-<div id="break-list"></div><p id="no-breaks" class="muted">Scrub to where drawing should pause, add a break, then set when it resumes.</p>
+<div id="break-list"></div><p id="no-breaks" class="muted">Scrub to where drawing should pause and add a break. Choose the picture to hold, then set when it resumes.</p>
 </section><div id="stroke-list"></div><div id="no-strokes" class="empty-list">Your strokes will appear here.<br>Make your first mark on the board.</div></aside></main>
 <footer><span><i></i> Everything stays on your device</span><span>BLACKBOARD STUDIO / MAKE IDEAS MOVE</span></footer><div id="status" role="status" aria-live="polite"></div>
 <input id="project-file" type="file" accept=".json,.blackboard" hidden><dialog id="export-dialog"><form method="dialog"><button class="close" aria-label="Close">×</button></form><div class="eyebrow">READY FOR THE WORLD</div><h2>Export your story.</h2><p>Full HD · 30 fps · WebM video</p><label class="check"><input id="with-audio" type="checkbox" checked> Include audio</label><p class="muted">Export runs in real time. Keep this tab visible until it finishes.</p><progress id="export-progress" value="0" max="1"></progress><p id="export-state"></p><button id="start-export" class="primary">Create video</button><button id="cancel-export" hidden>Cancel export</button><a id="download" class="button primary" hidden>Download video</a></dialog>

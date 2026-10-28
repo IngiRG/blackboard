@@ -37,18 +37,23 @@ Open **http://localhost:3000**. Use a recent desktop Chrome or Edge for video ex
 
 Limits: one-hour projects, 100 MB audio imports, 150 MB project imports. Unsupported or corrupt files display an error without replacing the current project. Keyboard shortcuts: Space to play/pause, Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z to redo, Ctrl/Cmd+S to save.
 
-## Continuous animation and breaks
+## Continuous animation: fixed start, fixed end, and breaks
 
-Choose **Continuous** under **Animation mode** on the right. The entire picture reveals in its original drawing order at a steady pace, without manually timing individual strokes. **Drawing time (without breaks)** controls the speed: longer values draw more slowly. Stroke timing settings are preserved when you switch modes.
+Choose **Continuous** under **Animation mode**. Timing applies to the whole picture, in drawing order. Set the window first:
 
-1. Play or scrub to the moment the drawing should stop.
-2. Click **Add break at playhead**. This inserts a one-second break; you can place it halfway through a stroke.
-3. Set **Pause at** and **Resume at** to the desired audio/video times, or scrub to a time and click **Pause here** / **Resume here**.
-4. Add more breaks as needed. Gold bands mark them on the waveform. Delete a break with its × button.
+1. Scrub the audio to when drawing should begin and click **Set start here**.
+2. Scrub to when the whole drawing should finish and click **Set end here**. You can also enter either time directly, including an end beyond the current audio.
+3. Scrub to where drawing should pause and click **Add break at playhead**.
+4. Set the break's **Pause at** and **Resume at** times, or use **Pause here** / **Resume here** at the playhead.
+5. To pause at a shape boundary, choose **Hold drawing at → After stroke N**. For a square drawn with four strokes followed by a circle, choose **After stroke 4**. **Show paused picture** lets you check the result. Leaving **Captured point** selected holds the exact drawing position visible when the break was added, even if it is halfway through a stroke.
 
-During a break, the drawing freezes and audio continues. At the resume time, drawing continues from exactly the same point at the same speed. Breaks extend the video rather than speeding up the remaining drawing. For example, 10 seconds of drawing plus a pause from 2s to 5s produces a 13-second animation (or longer if the audio lasts longer). Breaks cannot overlap. If you edit a break to occur after the drawing has already finished, it extends the final still image. The displayed **Length** is calculated from drawing time, breaks, and audio in continuous mode.
+**The start and end remain fixed when you add, extend, or delete breaks.** Drawing speed adjusts separately between the start, anchored breaks, and end. Each break remembers its drawing position as well as its times, so extending a pause does not change the picture held during that pause. Audio keeps playing throughout. Before the start the board is blank; after the end the completed drawing remains visible if audio continues.
 
-Continuous timing is used by preview and export, with or without sound, and saved in the project. New saves use project format version 2; older version 1 projects still open in per-stroke mode. Older app versions cannot open version 2 projects, so refresh the app before loading new saves.
+Example: set start to **2s**, end to **12s**, and a break at **5–8s** holding **After stroke 4**. The square draws from 2–5s, stays still from 5–8s, and the circle draws from 8–12s. The drawing still ends at 12s. Additional breaks work the same way.
+
+Breaks must be inside the start/end window, cannot overlap, and must follow drawing order. Invalid edits show an error and leave the existing timing intact. Adjust or remove breaks before moving an endpoint past them. Changing shapes after timing may require reselecting break positions because positions are saved as proportions of the drawing path.
+
+Preview, video export, and saved projects all use the same timing. Switching back to **Per stroke** restores your manual stroke timings and length. New saves use project format version 3. Version 1 projects still open in per-stroke mode; version 2 continuous projects are converted to fixed-window settings. Refresh the app before opening a new save in another browser.
 
 ## Development and verification
 
@@ -57,7 +62,7 @@ npm test
 npm run check
 ```
 
-Tests cover arc-length reveal sampling, smoothing endpoints, ordered timing/ripple behavior, bounds, project validation, and static-server routing. Rendering regression tests compare incremental paint operations with full redraws, including texture, rewind, mode changes, edits, and live smoothing. Continuous timing tests cover mid-stroke holds/resume, multiple and adjacent breaks, drawing speed, mode preservation, project compatibility, and equivalent preview/export paint operations. Operation-count tests ensure completed strokes are not repainted and forward animation paints each sample only once, regardless of frame count. Optional browser integration checks:
+Tests cover arc-length reveal sampling, smoothing endpoints, ordered timing/ripple behavior, bounds, project validation, and static-server routing. Rendering regression tests compare incremental paint operations with full redraws, including texture, rewind, mode changes, edits, and live smoothing. Continuous timing tests cover fixed endpoints, square-to-circle breaks, anchored mid-stroke holds/resume, changing pause duration, multiple breaks, drawing speed, mode preservation, project migration, and equivalent preview/export paint operations. Operation-count tests ensure completed strokes are not repainted and forward animation paints each sample only once, regardless of frame count. Optional browser integration checks:
 
 ```sh
 npm install --no-save playwright
@@ -70,7 +75,7 @@ The browser check exercises drawing, undo/redo, timing, playback, project round-
 ## Structure
 
 - `src/engine.js`: deterministic chalk rendering, smoothing, arc-length sampling, timing constraints, project validation.
-- `src/timing.js`: continuous drawing clock, break validation, and distance-based reveal schedule.
+- `src/timing.js`: fixed-window drawing progress, anchored breaks, project migration, and distance-based reveal coordinates.
 - `src/renderer.js`: bounded canvas caches, incremental live smoothing and animation, and frame-coalesced pointer rendering.
 - `src/app.js`: pointer input, editor controls, Web Audio playback, waveform, project I/O, and MediaRecorder export.
 - `src/style.css`: responsive studio layout.
