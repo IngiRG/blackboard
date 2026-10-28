@@ -112,3 +112,25 @@ test('pen bursts schedule one frame and cancelled frames cannot redraw stale inp
   scheduler.schedule();assert.equal(pending.size,1);scheduler.cancel();assert.equal(pending.size,0);
   scheduler.schedule();assert.equal(pending.size,1);
 });
+
+test('continuous preview and export hold identical frames inside a stroke and resume without extra paint',async()=>{
+  const {continuousStrokes,drawingTime}=await import('../src/timing.js');
+  const ss=continuousStrokes([stroke(),stroke(1)],4),breaks=[{start:1,end:3},{start:5,end:6}];
+  const previewBacking=canvas(),exportBacking=canvas();
+  const preview=new SceneRenderer(previewBacking),video=new SceneRenderer(exportBacking);
+  const target=canvas(),exportTarget=canvas();
+  let hold;
+  for(const wall of [0,.5,1,1.5,2,3,3.5,4,5,5.5,6,7]){
+    const active=drawingTime(wall,breaks);
+    preview.render(target.getContext(),ss,0,'#203631',active);
+    video.render(exportTarget.getContext(),ss,0,'#203631',active);
+    assert.deepEqual(target.operations,full(ss,active));
+    assert.deepEqual(exportTarget.operations,target.operations);
+    if(wall===1)hold={operations:target.operations.slice(),fills:previewBacking.fills};
+    if(wall>1&&wall<=3){assert.deepEqual(target.operations,hold.operations);assert.equal(previewBacking.fills,hold.fills);}
+  }
+  assert.deepEqual(target.operations,full(ss,4));
+  // Backward seeking into a break reconstructs precisely the held image.
+  preview.render(target.getContext(),ss,0,'#203631',drawingTime(2,breaks));
+  assert.deepEqual(target.operations,hold.operations);
+});
