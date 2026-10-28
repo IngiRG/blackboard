@@ -37,23 +37,26 @@ Open **http://localhost:3000**. Use a recent desktop Chrome or Edge for video ex
 
 Limits: one-hour projects, 100 MB audio imports, 150 MB project imports. Unsupported or corrupt files display an error without replacing the current project. Keyboard shortcuts: Space to play/pause, Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z to redo, Ctrl/Cmd+S to save.
 
-## Continuous animation: fixed start, fixed end, and breaks
+## Continuous animation: link drawing positions to audio times
 
-Choose **Continuous** under **Animation mode**. Timing applies to the whole picture, in drawing order. Set the window first:
+Choose **Continuous** under **Animation mode**. You have two independent sliders:
 
-1. Scrub the audio to when drawing should begin and click **Set start here**.
-2. Scrub to when the whole drawing should finish and click **Set end here**. You can also enter either time directly, including an end beyond the current audio.
-3. Scrub to where drawing should pause and click **Add break at playhead**.
-4. Set the break's **Pause at** and **Resume at** times, or use **Pause here** / **Resume here** at the playhead.
-5. To pause at a shape boundary, choose **Hold drawing at → After stroke N**. For a square drawn with four strokes followed by a circle, choose **After stroke 4**. **Show paused picture** lets you check the result. Leaving **Captured point** selected holds the exact drawing position visible when the break was added, even if it is halfway through a stroke.
+- **Drawing position** (right sidebar): scrub the picture from blank (0%) to complete (100%). This does not move the audio playhead.
+- **Audio position** (under the waveform): choose a time in your voiceover. This does not move the chosen picture.
 
-**The start and end remain fixed when you add, extend, or delete breaks.** Drawing speed adjusts separately between the start, anchored breaks, and end. Each break remembers its drawing position as well as its times, so extending a pause does not change the picture held during that pause. Audio keeps playing throughout. Before the start the board is blank; after the end the completed drawing remains visible if audio continues.
+When both are where you want them, click **Link these positions**. This saves “this point in the drawing belongs at this audio time.” You can add as many intermediate timing points as needed. The program adjusts drawing speed between neighboring points.
 
-Example: set start to **2s**, end to **12s**, and a break at **5–8s** holding **After stroke 4**. The square draws from 2–5s, stays still from 5–8s, and the circle draws from 8–12s. The drawing still ends at 12s. Additional breaks work the same way.
+**Example:** use the drawing slider to show the finished square, move the audio slider to 5 seconds, and click **Link these positions**. Leave the drawing slider unchanged, move the audio slider to 8 seconds, and link again. The square will hold still from 5–8 seconds, then the remaining drawing will continue toward the next timing point.
 
-Breaks must be inside the start/end window, cannot overlap, and must follow drawing order. Invalid edits show an error and leave the existing timing intact. Adjust or remove breaks before moving an endpoint past them. Changing shapes after timing may require reselecting break positions because positions are saved as proportions of the drawing path.
+**Start and end:** move the audio slider and click **Set start at audio** (0% drawn) or **Set end at audio** (100% drawn). The Start and End cards also accept audio times directly. Editing intermediate points never changes these endpoints.
 
-Preview, video export, and saved projects all use the same timing. Switching back to **Per stroke** restores your manual stroke timings and length. New saves use project format version 3. Version 1 projects still open in per-stroke mode; version 2 continuous projects are converted to fixed-window settings. Refresh the app before opening a new save in another browser.
+**Listen to audio · hold drawing** plays the voiceover while keeping your selected picture still. Pause when you hear the desired moment, then link it. **Preview timed animation** (or the main Play button) plays your saved mapping with audio and drawing together. Pausing preview keeps the currently displayed drawing selected.
+
+Diamond markers on the waveform represent saved pairs; click one or use **Show this pair** to inspect it. Gold bands show holds. Each card lets you edit its drawing percentage and audio time or delete an intermediate point. Linking at an existing audio time updates that pair. Times must increase and drawing positions cannot go backward; equal drawing positions create pauses. Invalid edits leave your mapping unchanged.
+
+Before the first point the board is blank. After the last point the complete picture remains visible if audio continues. Preview and video export use the same mapping. The independent slider selections only affect editing, never exported timing. Per-stroke mode and its manual timings remain available.
+
+New saves use project format version 4. Versions 1–3 still open and their previous timing is converted to pairs. Refresh the app before opening new saves in another browser. If you change the picture after mapping it, check your timing points: drawing positions are proportions of the full path.
 
 ## Development and verification
 
@@ -62,7 +65,7 @@ npm test
 npm run check
 ```
 
-Tests cover arc-length reveal sampling, smoothing endpoints, ordered timing/ripple behavior, bounds, project validation, and static-server routing. Rendering regression tests compare incremental paint operations with full redraws, including texture, rewind, mode changes, edits, and live smoothing. Continuous timing tests cover fixed endpoints, square-to-circle breaks, anchored mid-stroke holds/resume, changing pause duration, multiple breaks, drawing speed, mode preservation, project migration, and equivalent preview/export paint operations. Operation-count tests ensure completed strokes are not repainted and forward animation paints each sample only once, regardless of frame count. Optional browser integration checks:
+Tests cover arc-length reveal sampling, smoothing endpoints, ordered timing/ripple behavior, bounds, project validation, and static-server routing. Rendering regression tests compare incremental paint operations with full redraws, including texture, rewind, mode changes, edits, and live smoothing. Continuous timing tests cover linked position/time pairs, fixed endpoints, repeated-position holds, invalid mappings, project migration, and equivalent preview/export paint operations. An editor handler test checks that each slider leaves the other cursor unchanged and saves the exact chosen pairs. Operation-count tests ensure completed strokes are not repainted and forward animation paints each sample only once, regardless of frame count. Optional browser integration checks:
 
 ```sh
 npm install --no-save playwright
@@ -75,7 +78,7 @@ The browser check exercises drawing, undo/redo, timing, playback, project round-
 ## Structure
 
 - `src/engine.js`: deterministic chalk rendering, smoothing, arc-length sampling, timing constraints, project validation.
-- `src/timing.js`: fixed-window drawing progress, anchored breaks, project migration, and distance-based reveal coordinates.
+- `src/timing.js`: drawing-to-audio timing points, interpolation, project migration, and distance-based reveal coordinates.
 - `src/renderer.js`: bounded canvas caches, incremental live smoothing and animation, and frame-coalesced pointer rendering.
 - `src/app.js`: pointer input, editor controls, Web Audio playback, waveform, project I/O, and MediaRecorder export.
 - `src/style.css`: responsive studio layout.

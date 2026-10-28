@@ -115,7 +115,7 @@ test('pen bursts schedule one frame and cancelled frames cannot redraw stale inp
 
 test('continuous preview and export hold identical frames inside a stroke and resume without extra paint',async()=>{
   const {continuousStrokes,continuousProgress,defaultAnimation}=await import('../src/timing.js');
-  const ss=continuousStrokes([stroke(),stroke(1)]),animation={...defaultAnimation(7),start:0,end:7,breaks:[{start:1,end:3,position:.25},{start:5,end:6,position:.75}]};
+  const ss=continuousStrokes([stroke(),stroke(1)]),animation={...defaultAnimation(7),points:[{time:0,position:0},{time:1,position:.25},{time:3,position:.25},{time:5,position:.75},{time:6,position:.75},{time:7,position:1}]};
   const previewBacking=canvas(),exportBacking=canvas();
   const preview=new SceneRenderer(previewBacking),video=new SceneRenderer(exportBacking);
   const target=canvas(),exportTarget=canvas();

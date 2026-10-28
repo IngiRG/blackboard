@@ -1,11 +1,11 @@
-import {defaultAnimation, continuousProgress, activeDrawingDuration, addBreakAt, migrateAnimation, continuousDuration, validateAnimation, continuousStrokes} from './timing.js';
+import {defaultAnimation, continuousProgress, linkPoint, setEndpoint, migrateAnimation, continuousDuration, validateAnimation, continuousStrokes} from './timing.js';
 import {W,H,clamp,samples,smoothPoints,drawStroke,setTiming,validateProject} from './engine.js';
 import {SceneRenderer, LiveStrokeRenderer, frameScheduler} from './renderer.js';
 function safeTiming(...args){try{setTiming(...args);}catch(error){toast(error.message);}}
 const $=id=>document.getElementById(id), board=$('board'),ctx=board.getContext('2d');
-let strokes=[],redo=[],current=null,selected=-1,mode='draw',time=0,playing=false,origin=0,raf=0,audioContext=null,audioBuffer=null,audioSource=null,audioData=null,exporting=false,cancelExport=false,downloadURL=null;
+let strokes=[],redo=[],current=null,selected=-1,mode='draw',time=0,playing=false,audioOnly=false,origin=0,raf=0,audioContext=null,audioBuffer=null,audioSource=null,audioData=null,exporting=false,cancelExport=false,downloadURL=null;
 let duration=10,background='#203631',dirty=false;
-let animation=defaultAnimation(), continuousSequence=[], continuousInitialized=false;
+let animation=defaultAnimation(), continuousSequence=[], continuousInitialized=false, drawingPosition=0;
 function toast(message){$('status').textContent=message;$('status').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('status').style.display='none',4500);}
 function prepare(s){s.samples=samples(smoothPoints(s.points,s.smoothing));return s;}
 let revision = 0, drawingRevision = 0;
@@ -20,12 +20,12 @@ function render(target = ctx, t = time, all = mode === 'draw') {
   }
   const continuous = !all && animation.mode === 'continuous';
   renderer.render(target, continuous ? continuousSequence : strokes, all ? drawingRevision : revision, background,
-    continuous ? continuousProgress(t, animation) : t, all);
+    continuous ? (target === ctx && (!playing || audioOnly) ? drawingPosition : continuousProgress(t, animation)) : t, all);
   if (current && target === ctx && all) liveRenderer.render(target, current);
   if (target === ctx) $('empty').hidden = strokes.length > 0 || !!current;
 }
 function format(t){return `${Math.floor(t/60)}:${(t%60).toFixed(2).padStart(5,'0')}`;}
-function updateTime(){ $('seek').max=duration;$('seek').value=time;$('time').textContent=`${format(time)} / ${format(duration)}`;updateBreakState();}
+function updateTime(){ $('seek').max=duration;$('seek').value=time;$('time').textContent=`${format(time)} / ${format(duration)}`;updateMappingState();}
 function changed(appendOnly=false){revision++;if(!appendOnly)drawingRevision++;dirty=true;continuousSequence=continuousStrokes(strokes);duration=animation.mode==='continuous'?Math.max(continuousDuration(animation),audioBuffer?.duration||0):Math.max(animation.strokeDuration,strokes.at(-1)?.end||0,audioBuffer?.duration||0);if(animation.mode==='stroke')animation.strokeDuration=duration;time=Math.min(time,duration);$('duration').value=duration.toFixed(2);$('stroke-count').textContent=`${strokes.length} stroke${strokes.length===1?'':'s'}`;$('undo').disabled=!strokes.length;$('redo').disabled=!redo.length;list();timingControls();updateTime();render();}
 function list(){const parent=$('stroke-list');parent.replaceChildren();$('no-strokes').hidden=strokes.length>0;strokes.forEach((s,i)=>{const card=document.createElement('div');card.className='stroke-card'+(selected===i?' selected':'');const top=document.createElement('div');top.className='stroke-top';const dot=document.createElement('span');dot.className='dot';dot.style.background=s.color;top.append(dot,document.createTextNode(`Stroke ${String(i+1).padStart(2,'0')}`));const del=document.createElement('button');del.textContent='×';del.title=`Delete stroke ${i+1}`;del.onclick=()=>{if(exporting)return;pause();strokes.splice(i,1);redo=[];changed();};top.append(del);card.append(top);const times=document.createElement('div');times.className='times';for(const field of ['start','end']){const label=document.createElement('label');label.textContent=field==='start'?'START · seconds':'END · seconds';const input=document.createElement('input');input.type='number';input.min=0;input.max=3600;input.step=.05;input.value=s[field].toFixed(2);input.setAttribute('aria-label',`Stroke ${i+1} ${field}`);input.onchange=()=>{if(exporting)return;pause();let start=field==='start'?Number(input.value):s.start,end=field==='end'?Number(input.value):s.end;if(!Number.isFinite(start)||!Number.isFinite(end)||Math.max(start,end)>3500){toast('Enter a time below 3500 seconds.');list();return;}safeTiming(strokes,i,start,end);selected=i;changed();};label.append(input);times.append(label);}card.append(times);const cues=document.createElement('div');cues.className='cue-buttons';for(const field of ['start','end']){const b=document.createElement('button');b.textContent=`Set ${field} here`;b.onclick=()=>{if(exporting)return;safeTiming(strokes,i,field==='start'?time:s.start,field==='end'?time:s.end);selected=i;changed();};cues.append(b);}card.append(cues);parent.append(card);});}
 function setMode(next){if(exporting)return;pause();if(current)finish();mode=next;$('draw-mode').classList.toggle('active',mode==='draw');$('animate-mode').classList.toggle('active',mode==='animate');$('mode-hint').textContent=mode==='draw'?'Draw with your mouse, pen, or finger.':'Preview mode · adjust animation timing on the right.';board.style.cursor=mode==='draw'?'crosshair':'default';render();}
@@ -40,30 +40,33 @@ for(const [id,suffix] of [['width',' px'],['smooth','%'],['texture','%']])$(id).
 $('undo').onclick=()=>{if(exporting||!strokes.length)return;pause();redo.push(strokes.pop());changed();};$('redo').onclick=()=>{if(exporting||!redo.length)return;pause();strokes.push(redo.pop());changed(true);};$('clear').onclick=()=>{if(exporting||!strokes.length||!confirm('Clear all strokes? Save your project first if you want to keep them.'))return;pause();strokes=[];redo=[];changed();};
 async function getAudioContext(){audioContext??=new AudioContext();if(audioContext.state==='suspended')await audioContext.resume();return audioContext;}
 function stopAudio(){if(audioSource){try{audioSource.stop();}catch{}audioSource.disconnect();audioSource=null;}}
-function pause(){playing=false;cancelAnimationFrame(raf);stopAudio();$('play').textContent='▶';$('play').setAttribute('aria-label','Play animation');}
+function pause(){if(playing&&!audioOnly&&animation.mode==='continuous')drawingPosition=continuousProgress(time,animation);playing=false;audioOnly=false;cancelAnimationFrame(raf);stopAudio();$('play').textContent='▶';$('play').setAttribute('aria-label','Play animation');}
 function tick(){if(!playing)return;time=Math.min(duration,(audioContext.currentTime-origin));updateTime();render();if(time>=duration)pause();else raf=requestAnimationFrame(tick);}
-async function play(){if(exporting)return;if(playing){pause();return;}setMode('animate');const ac=await getAudioContext();if(time>=duration)time=0;if(audioBuffer&&time<audioBuffer.duration){audioSource=ac.createBufferSource();audioSource.buffer=audioBuffer;audioSource.connect(ac.destination);audioSource.start(0,time);}origin=ac.currentTime-time;playing=true;$('play').textContent='Ⅱ';$('play').setAttribute('aria-label','Pause animation');tick();}
-$('play').onclick=()=>play().catch(e=>toast(e.message));$('restart').onclick=()=>{if(exporting)return;pause();time=0;updateTime();render();};$('seek').oninput=()=>{if(exporting)return;const nextTime=+$('seek').value;if(mode!=='animate')setMode('animate');else pause();time=nextTime;updateTime();render();};$('duration').onchange=()=>{if(exporting)return;pause();duration=clamp(Number($('duration').value)||10,1,3600);animation.strokeDuration=duration;duration=Math.max(duration,strokes.at(-1)?.end||0,audioBuffer?.duration||0);changed();};$('fit').onclick=()=>{if(exporting||!strokes.length)return;pause();const each=duration/strokes.length;if(each<.05){toast('Increase the duration to fit all strokes.');return;}strokes.forEach((s,i)=>{s.start=i*each;s.end=(i+1)*each;});changed();};
+async function play(listenOnly=false){if(exporting)return;if(playing){pause();return;}setMode('animate');const ac=await getAudioContext();if(time>=duration)time=0;if(audioBuffer&&time<audioBuffer.duration){audioSource=ac.createBufferSource();audioSource.buffer=audioBuffer;audioSource.connect(ac.destination);audioSource.start(0,time);}origin=ac.currentTime-time;audioOnly=listenOnly;playing=true;$('play').textContent='Ⅱ';$('play').setAttribute('aria-label','Pause animation');tick();}
+$('play').onclick=()=>play().catch(e=>toast(e.message));$('restart').onclick=()=>{if(exporting)return;pause();time=0;drawingPosition=0;updateTime();render();};$('seek').oninput=()=>{if(exporting)return;const nextTime=+$('seek').value;if(mode!=='animate')setMode('animate');else pause();time=nextTime;updateTime();render();};$('duration').onchange=()=>{if(exporting)return;pause();duration=clamp(Number($('duration').value)||10,1,3600);animation.strokeDuration=duration;duration=Math.max(duration,strokes.at(-1)?.end||0,audioBuffer?.duration||0);changed();};$('fit').onclick=()=>{if(exporting||!strokes.length)return;pause();const each=duration/strokes.length;if(each<.05){toast('Increase the duration to fit all strokes.');return;}strokes.forEach((s,i)=>{s.start=i*each;s.end=(i+1)*each;});changed();};
 function waveform(){const c=$('wave').getContext('2d');c.clearRect(0,0,1200,64);if(!audioBuffer){$('audio-name').textContent='Add a voiceover, or tell a silent story.';return;}const data=audioBuffer.getChannelData(0);c.fillStyle='#8da889';for(let i=0;i<600;i++){let peak=0;const a=Math.floor(i*data.length/600),b=Math.floor((i+1)*data.length/600);for(let j=a;j<b;j+=Math.max(1,Math.floor((b-a)/150)))peak=Math.max(peak,Math.abs(data[j]));c.fillRect(i*2,32-peak*29,1,Math.max(1,peak*58));}$('audio-name').textContent=audioData?.name||'Voiceover';}
 function dataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Could not read file.'));r.readAsDataURL(file);});}
 async function loadAudio(file){if(file.size>100*1024*1024)throw Error('Choose an audio file smaller than 100 MB.');const ac=await getAudioContext(),buffer=await ac.decodeAudioData(await file.arrayBuffer());if(buffer.duration>3600)throw Error('Audio must be shorter than one hour.');const data=await dataURL(new Blob([file],{type:file.type.startsWith('audio/')?file.type:'audio/wav'}));pause();audioBuffer=buffer;audioData={name:file.name,data};$('remove-audio').hidden=false;changed();waveform();toast('Audio ready. Switch to Animate to time your strokes.');}
 $('upload').onclick=()=>{if(!exporting)$('audio-file').click();};$('audio-file').onchange=async e=>{try{if(e.target.files[0])await loadAudio(e.target.files[0]);}catch(err){toast('Audio could not be loaded: '+err.message);}e.target.value='';};$('remove-audio').onclick=()=>{if(exporting)return;pause();audioBuffer=null;audioData=null;$('remove-audio').hidden=true;changed();waveform();};
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-$('save').onclick=()=>{const project={version:3,animation,background,duration,strokes:strokes.map(({samples,...s})=>s),audio:audioData};download(new Blob([JSON.stringify(project)],{type:'application/json'}),'my-story.blackboard');dirty=false;toast('Project saved, including its audio.');};$('open').onclick=()=>{if(!exporting)$('project-file').click();};$('project-file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>150*1024*1024)throw Error('Project is too large.');const data=validateProject(JSON.parse(await file.text()));let buffer=null;if(data.audio){const ac=await getAudioContext();buffer=await ac.decodeAudioData(await(await fetch(data.audio.data)).arrayBuffer());if(buffer.duration>3600)throw Error('Audio exceeds one hour.');}if(dirty&&!confirm('Replace this unsaved project?'))return;pause();strokes=data.strokes.map(prepare);redo=[];background=data.background;$('background').value=background;duration=data.duration;animation=migrateAnimation(data.animation,data.duration);continuousInitialized=!!data.animation;audioBuffer=buffer;audioData=data.audio||null;time=0;$('remove-audio').hidden=!buffer;changed();dirty=false;brush();waveform();toast('Project opened.');}catch(err){toast('Could not open project: '+err.message);}e.target.value='';};
+$('save').onclick=()=>{const project={version:4,animation,background,duration,strokes:strokes.map(({samples,...s})=>s),audio:audioData};download(new Blob([JSON.stringify(project)],{type:'application/json'}),'my-story.blackboard');dirty=false;toast('Project saved, including its audio.');};$('open').onclick=()=>{if(!exporting)$('project-file').click();};$('project-file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>150*1024*1024)throw Error('Project is too large.');const data=validateProject(JSON.parse(await file.text()));let buffer=null;if(data.audio){const ac=await getAudioContext();buffer=await ac.decodeAudioData(await(await fetch(data.audio.data)).arrayBuffer());if(buffer.duration>3600)throw Error('Audio exceeds one hour.');}if(dirty&&!confirm('Replace this unsaved project?'))return;pause();strokes=data.strokes.map(prepare);redo=[];background=data.background;$('background').value=background;duration=data.duration;animation=migrateAnimation(data.animation,data.duration);continuousInitialized=!!data.animation;audioBuffer=buffer;audioData=data.audio||null;time=0;drawingPosition=0;$('remove-audio').hidden=!buffer;changed();dirty=false;brush();waveform();toast('Project opened.');}catch(err){toast('Could not open project: '+err.message);}e.target.value='';};
 $('export').onclick=()=>{if(!strokes.length){toast('Draw something before exporting.');return;}$('with-audio').disabled=!audioBuffer;$('export-dialog').showModal();};$('cancel-export').onclick=()=>{cancelExport=true;};$('export-dialog').addEventListener('cancel',e=>{if(exporting)e.preventDefault();});
 $('start-export').onclick=async()=>{if(exporting)return;if(!window.MediaRecorder||!board.captureStream){toast('Video export is not supported in this browser. Try Chrome or Edge.');return;}const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(x=>MediaRecorder.isTypeSupported(x));if(!mime){toast('This browser cannot export WebM video. Try Chrome or Edge.');return;}pause();exporting=true;cancelExport=false;$('start-export').hidden=true;$('cancel-export').hidden=false;$('download').hidden=true;$('export-dialog').querySelector('.close').disabled=true;document.querySelector('main').inert=true;document.querySelector('header').inert=true;let stream,source,dest,recorder;try{const ac=await getAudioContext();const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;const c=canvas.getContext('2d');render(c,0,false);stream=canvas.captureStream(30);if($('with-audio').checked&&audioBuffer){dest=ac.createMediaStreamDestination();source=ac.createBufferSource();source.buffer=audioBuffer;source.connect(dest);for(const track of dest.stream.getAudioTracks())stream.addTrack(track);}const chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8000000});recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};const stopped=new Promise((resolve,reject)=>{recorder.onstop=resolve;recorder.onerror=e=>reject(e.error||Error('Recording failed.'));});recorder.start(250);const start=ac.currentTime+.1;source?.start(start);await new Promise(resolve=>{function frame(){const t=Math.max(0,ac.currentTime-start);render(c,Math.min(t,duration),false);$('export-progress').value=Math.min(t/duration,1);$('export-state').textContent=`Rendering ${Math.round(Math.min(t/duration,1)*100)}%`;if(t>=duration||cancelExport){resolve();return;}setTimeout(frame,1000/30);}frame();});if(recorder.state!=='inactive')recorder.stop();await stopped;if(cancelExport){$('export-state').textContent='Export cancelled. Keep the tab visible when exporting.';}else{if(downloadURL)URL.revokeObjectURL(downloadURL);downloadURL=URL.createObjectURL(new Blob(chunks,{type:mime}));$('download').href=downloadURL;$('download').download='blackboard-story.webm';$('download').hidden=false;$('export-state').textContent='Your video is ready.';}}catch(err){$('export-state').textContent='Export failed: '+err.message;}finally{if(recorder&&recorder.state!=='inactive')recorder.stop();try{source?.stop();}catch{}source?.disconnect();dest?.disconnect();stream?.getTracks().forEach(t=>t.stop());exporting=false;$('start-export').hidden=false;$('cancel-export').hidden=true;$('export-dialog').querySelector('.close').disabled=false;document.querySelector('main').inert=false;document.querySelector('header').inert=false;render();}};
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(exporting){cancelExport=true;$('export-state').textContent='Export cancelled because the tab was hidden. Keep it visible and retry.';}pause();}});
 document.addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||exporting||$('export-dialog').open)return;if(e.code==='Space'){e.preventDefault();play().catch(err=>toast(err.message));}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();$(e.shiftKey?'redo':'undo').click();}if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();$('save').click();}});
 
-function updateBreakState() {
+function updateMappingState() {
   if (animation.mode !== 'continuous') return;
-  const gap = animation.breaks.find(g => time >= g.start && time < g.end);
-  $('break-state').textContent = gap ? `Drawing paused · resumes at ${format(gap.end)}` :
-    (time < animation.start ? `Drawing starts at ${format(animation.start)}` : time >= animation.end ? 'Drawing complete' : 'Drawing continues');
+  const position = playing && !audioOnly ? continuousProgress(time, animation) : drawingPosition;
+  $('animation-seek').value = position * 100;
+  $('animation-position').value = `${(position * 100).toFixed(1)}%`;
+  $('link-audio-time').textContent = format(time);
+  $('mapping-state').textContent = playing ? (audioOnly ? 'Listening to audio · chosen drawing stays still' : 'Playing your saved timing points') :
+    `Ready to link ${(drawingPosition * 100).toFixed(1)}% of the drawing to ${format(time)} of the audio.`;
 }
 
 function commitAnimation(next) {
-  if (exporting) return;
+  if (exporting) return false;
   try {
     validateAnimation(next);
     pause();
@@ -77,6 +80,14 @@ function commitAnimation(next) {
   }
 }
 
+function inspectPoint(point) {
+  pause();
+  drawingPosition = point.position;
+  time = point.time;
+  setMode('animate');
+  updateTime();
+}
+
 function timingControls() {
   const continuous = animation.mode === 'continuous';
   $('timing-mode').value = animation.mode;
@@ -85,87 +96,65 @@ function timingControls() {
   $('no-strokes').hidden = continuous || strokes.length > 0;
   $('fit').hidden = continuous;
   $('duration').disabled = continuous;
-  $('duration').title = continuous ? 'Total length covers the animation end and audio.' : '';
-  $('animation-start').value = animation.start.toFixed(2);
-  $('animation-end').value = animation.end.toFixed(2);
-  $('drawing-time-summary').textContent = `${activeDrawingDuration(animation).toFixed(2)} seconds of drawing inside a ${(animation.end-animation.start).toFixed(2)} second window.`;
-  $('add-break').disabled = !strokes.length;
+  $('duration').title = continuous ? 'Length covers the last timing point and audio.' : '';
+  $('link-point').disabled = !strokes.length;
+  $('preview-mapping').disabled = !strokes.length;
+  $('listen-audio').disabled = !audioBuffer;
   $('timing-help').textContent = continuous
-    ? 'Set one start and end for the entire picture, then add breaks between shapes or within strokes.'
+    ? 'Choose a drawing position and an audio time independently, then link them.'
     : 'Strokes reveal in drawing order. Set a start and end, or use the playhead.';
-  $('no-breaks').hidden = animation.breaks.length > 0;
-  const parent = $('break-list');
+  const parent = $('point-list');
   parent.replaceChildren();
-  $('break-markers').replaceChildren();
+  $('timing-markers').replaceChildren();
   if (!continuous) return;
-  animation.breaks.forEach((gap, i) => {
+  animation.points.forEach((point, i) => {
+    const endpoint = i === 0 || i === animation.points.length - 1;
+    const name = i === 0 ? 'Start' : i === animation.points.length - 1 ? 'End' : `Point ${i}`;
     const card = document.createElement('div');
     card.className = 'stroke-card';
     const top = document.createElement('div');
     top.className = 'stroke-top';
-    top.textContent = `Break ${i + 1}`;
-    const remove = document.createElement('button');
-    remove.textContent = '×';
-    remove.setAttribute('aria-label', `Delete break ${i + 1}`);
-    remove.onclick = () => commitAnimation({...animation, breaks: animation.breaks.filter((_, index) => index !== i)});
-    top.append(remove);
-    card.append(top);
-    const times = document.createElement('div');
-    times.className = 'times';
-    const cues = document.createElement('div');
-    cues.className = 'cue-buttons';
-    for (const field of ['start', 'end']) {
-      const label = document.createElement('label');
-      label.textContent = field === 'start' ? 'PAUSE AT · seconds' : 'RESUME AT · seconds';
-      const input = document.createElement('input');
-      input.type = 'number'; input.min = 0; input.max = 3600; input.step = .05;
-      input.value = gap[field].toFixed(2);
-      input.setAttribute('aria-label', `Break ${i + 1} ${field === 'start' ? 'start' : 'resume'}`);
-      const edit = value => {
-        const breaks = animation.breaks.map((g, index) => index === i ? {...g, [field]: value} : {...g});
-        breaks.sort((a, b) => a.start - b.start);
-        commitAnimation({...animation, breaks});
-      };
-      input.onchange = () => edit(input.value === '' ? NaN : Number(input.value));
-      label.append(input); times.append(label);
-      const cue = document.createElement('button');
-      cue.textContent = field === 'start' ? 'Pause here' : 'Resume here';
-      cue.onclick = () => edit(time);
-      cues.append(cue);
+    top.textContent = name;
+    if (!endpoint) {
+      const remove = document.createElement('button');
+      remove.textContent = '×'; remove.setAttribute('aria-label', `Delete point ${i}`);
+      remove.onclick = () => commitAnimation({...animation, points: animation.points.filter((_,index) => index !== i)});
+      top.append(remove);
     }
-    card.append(times, cues);
-    const anchorLabel = document.createElement('label');
-    anchorLabel.className = 'timing-select';
-    anchorLabel.textContent = 'Hold drawing at';
-    const anchor = document.createElement('select');
-    anchor.setAttribute('aria-label', `Break ${i + 1} drawing position`);
-    const exact = document.createElement('option');
-    exact.value = 'current'; exact.textContent = `Captured point (${(gap.position * 100).toFixed(1)}%)`;
-    anchor.append(exact);
-    continuousSequence.forEach((stroke, index) => {
-      if (index === continuousSequence.length - 1) return;
-      const option = document.createElement('option');
-      option.value = String(index); option.textContent = `After stroke ${index + 1}`;
-      if (Math.abs(gap.position - stroke.end) < 1e-10) option.selected = true;
-      anchor.append(option);
-    });
-    anchor.onchange = () => {
-      const position = anchor.value === 'current' ? gap.position : continuousSequence[Number(anchor.value)].end;
-      const breaks = animation.breaks.map((g, index) => index === i ? {...g, position} : g);
-      if (commitAnimation({...animation, breaks})) {time = gap.start;setMode('animate');updateTime();}
-    };
-    anchorLabel.append(anchor); card.append(anchorLabel);
-    const preview = document.createElement('button');
-    preview.textContent = 'Show paused picture';
-    preview.onclick = () => {time = gap.start;setMode('animate');updateTime();};
-    card.append(preview);
-    parent.append(card);
-    const marker = document.createElement('span');
-    marker.className = 'break-marker';
-    marker.style.left = `${100 * gap.start / duration}%`;
-    marker.style.width = `${100 * (gap.end - gap.start) / duration}%`;
-    $('break-markers').append(marker);
+    card.append(top);
+    const fields = document.createElement('div'); fields.className = 'times';
+    for (const field of ['position','time']) {
+      const label = document.createElement('label');
+      label.textContent = field === 'position' ? 'DRAWING · %' : 'AUDIO · seconds';
+      const input = document.createElement('input');
+      input.type = 'number'; input.min = 0; input.max = field === 'position' ? 100 : 3600;
+      input.step = .01; input.value = field === 'position' ? (point.position*100).toFixed(2) : point.time.toFixed(2);
+      input.disabled = endpoint && field === 'position';
+      input.setAttribute('aria-label', `${name} ${field === 'position' ? 'drawing percent' : 'audio time'}`);
+      input.onchange = () => {
+        const value = input.value === '' ? NaN : Number(input.value) / (field === 'position' ? 100 : 1);
+        const points = animation.points.map((p,index) => index === i ? {...p,[field]:value} : {...p});
+        // Preserve point identities and reject crossing neighboring points.
+        commitAnimation({...animation, points});
+      };
+      label.append(input); fields.append(label);
+    }
+    card.append(fields);
+    const show = document.createElement('button'); show.className = 'show-point'; show.textContent = 'Show this pair';
+    show.onclick = () => inspectPoint(point); card.append(show); parent.append(card);
+    const marker = document.createElement('button');
+    marker.className = 'timing-point-marker'; marker.style.left = `${100 * point.time / duration}%`;
+    marker.title = `${name}: ${(point.position*100).toFixed(1)}% at ${format(point.time)}`;
+    marker.setAttribute('aria-label', marker.title); marker.textContent = '◆';
+    marker.onclick = () => inspectPoint(point); $('timing-markers').append(marker);
+    const previous = animation.points[i-1];
+    if (previous && previous.position === point.position) {
+      const hold = document.createElement('span'); hold.className = 'hold-marker';
+      hold.style.left = `${100*previous.time/duration}%`; hold.style.width = `${100*(point.time-previous.time)/duration}%`;
+      $('timing-markers').prepend(hold);
+    }
   });
+  updateMappingState();
 }
 
 $('timing-mode').onchange = () => {
@@ -173,30 +162,38 @@ $('timing-mode').onchange = () => {
   if (current) finish();
   const next = {...animation, mode: $('timing-mode').value};
   if (next.mode === 'continuous' && !continuousInitialized) {
-    next.start = 0;
-    next.end = duration;
+    next.points = [{time:0,position:0},{time:duration,position:1}];
     continuousInitialized = true;
   }
-  commitAnimation(next);
-  setMode('animate');
+  if (commitAnimation(next)) {drawingPosition = continuousProgress(time, animation);setMode('animate');updateTime();}
 };
-function setWindow(field, value) {
-  if (commitAnimation({...animation, [field]: value})) setMode('animate');
-}
-for (const field of ['start', 'end']) {
-  $(`animation-${field}`).onchange = () => {
-    const input = $(`animation-${field}`);
-    setWindow(field, input.value === '' ? NaN : Number(input.value));
-  };
-  $(`set-animation-${field}`).onclick = () => setWindow(field, Math.round(time * 100) / 100);
-}
-$('add-break').onclick = () => {
+$('animation-seek').oninput = () => {
+  if (exporting) return;
+  const position = Number($('animation-seek').value) / 100;
+  pause(); drawingPosition = position;
+  setMode('animate'); updateMappingState();
+};
+$('link-point').onclick = () => {
   if (exporting || !strokes.length) return;
   pause();
   try {
-    const next = addBreakAt(animation, Math.round(time * 100) / 100);
-    if (commitAnimation(next)) setMode('animate');
-  } catch (error) { toast(error.message); }
+    if (commitAnimation(linkPoint(animation, Math.round(time*100)/100, drawingPosition))) {
+      toast('Drawing position linked to audio time.'); setMode('animate');
+    }
+  } catch(error) { toast(error.message); }
 };
+for (const which of ['start','end']) {
+  $(`set-map-${which}`).onclick = () => {
+    if (exporting) return;
+    pause();
+    try {
+      if (commitAnimation(setEndpoint(animation, which, Math.round(time*100)/100))) {
+        drawingPosition = which === 'start' ? 0 : 1; setMode('animate'); updateTime();
+      }
+    } catch(error) { toast(error.message); }
+  };
+}
+$('listen-audio').onclick = () => play(true).catch(error => toast(error.message));
+$('preview-mapping').onclick = () => play().catch(error => toast(error.message));
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 changed();dirty=false;brush();waveform();

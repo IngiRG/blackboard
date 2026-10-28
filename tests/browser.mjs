@@ -13,50 +13,48 @@ const projectDownload=page.waitForEvent('download');await page.locator('#save').
 // A one-second PCM WAV gives a real decoded audio track for the second export.
 const wav=Buffer.alloc(44+44100*2);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(88200,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);for(let i=0;i<44100;i++)wav.writeInt16LE(Math.round(Math.sin(i/44100*Math.PI*880)*4000),44+i*2);
 await page.locator('#audio-file').setInputFiles({name:'tone.wav',mimeType:'audio/wav',buffer:wav});await page.waitForFunction(()=>!document.getElementById('remove-audio').hidden);for(const sound of [false,true]){await page.locator('#export').click();await page.locator('#with-audio').setChecked(sound);await page.locator('#start-export').click();await page.locator('#download').waitFor({state:'visible',timeout:15000});const result=await page.evaluate(async()=>{const blob=await(await fetch(document.getElementById('download').href)).blob();return{size:blob.size,type:blob.type};});assert.ok(result.size>1000);assert.match(result.type,/video\/webm/);await page.locator('.close').click();}
-// Continuous mode: a break freezes the drawing halfway through a stroke.
+// Independent cursors, linked pairs, pauses, endpoints, project roundtrip.
 await page.locator('#timing-mode').selectOption('continuous');
-await page.locator('#animation-end').fill('4');
-await page.locator('#animation-end').dispatchEvent('change');
+await page.getByLabel('End audio time',{exact:true}).fill('4');
+await page.getByLabel('End audio time',{exact:true}).dispatchEvent('change');
 async function seekTo(value) {
   await page.locator('#seek').fill(String(value));
   await page.locator('#seek').dispatchEvent('input');
 }
-await seekTo(.5);
-await page.locator('#set-animation-start').click();
-assert.equal(await page.locator('#animation-start').inputValue(),'0.50');
-await seekTo(4);
-await page.locator('#set-animation-end').click();
-await seekTo(1);
-const beforeBreak=await page.locator('#board').evaluate(canvas=>canvas.toDataURL());
-await page.locator('#add-break').click();
-await page.getByLabel('Break 1 resume').fill('3');
-await page.getByLabel('Break 1 resume').dispatchEvent('change');
-assert.equal(await page.locator('#duration').inputValue(),'4.00');
-assert.equal(await page.locator('.break-marker').count(),1);
+async function drawingTo(value) {
+  await page.locator('#animation-seek').fill(String(value));
+  await page.locator('#animation-seek').dispatchEvent('input');
+}
 const pixels=()=>page.locator('#board').evaluate(canvas=>canvas.toDataURL());
-await seekTo(1);const held=await pixels();assert.equal(held,beforeBreak);
-await seekTo(2);assert.equal(await pixels(),held);
-await seekTo(3);assert.equal(await pixels(),held);
-await seekTo(3.5);assert.notEqual(await pixels(),held);
-await seekTo(2);assert.equal(await pixels(),held);
-const continuousDownload=page.waitForEvent('download');
-await page.locator('#save').click();
-const continuousProject=await continuousDownload;
+await drawingTo(40);const chosen=await pixels();
+await seekTo(1);assert.equal(await pixels(),chosen);
+assert.equal(Number(await page.locator('#animation-seek').inputValue()),40);
+await page.locator('#link-point').click();
+await seekTo(3);assert.equal(await pixels(),chosen);
+await page.locator('#link-point').click();
+assert.equal(await page.locator('.timing-point-marker').count(),4);
+assert.equal(await page.locator('.hold-marker').count(),1);
+await drawingTo(70);assert.equal(Number(await page.locator('#seek').inputValue()),3);
+await seekTo(.5);await page.locator('#set-map-start').click();
+await seekTo(4);await page.locator('#set-map-end').click();
+assert.equal(await page.locator('#duration').inputValue(),'4.00');
+// Playing audio alone must not move the selected drawing.
+await drawingTo(40);await seekTo(0);await page.locator('#listen-audio').click();
+await page.waitForTimeout(300);assert.equal(await pixels(),chosen);await page.locator('#play').click();
+const saved=page.waitForEvent('download');await page.locator('#save').click();const project2=await saved;
 await page.locator('#timing-mode').selectOption('stroke');
 assert.equal(await page.locator('#duration').inputValue(),'1.00');
 page.once('dialog',dialog=>dialog.accept());
-await page.locator('#project-file').setInputFiles(await continuousProject.path());
+await page.locator('#project-file').setInputFiles(await project2.path());
 await page.waitForFunction(()=>document.getElementById('timing-mode').value==='continuous');
-assert.equal(await page.getByLabel('Break 1 resume').inputValue(),'3.00');
-assert.equal(await page.locator('#animation-start').inputValue(),'0.50');
-assert.equal(await page.locator('#animation-end').inputValue(),'4.00');
-await seekTo(2);assert.equal(await pixels(),held);
-await page.locator('#export').click();
-await page.locator('#start-export').click();
-await page.locator('#download').waitFor({state:'visible',timeout:20000});
-await page.locator('.close').click();
-await page.getByLabel('Delete break 1').click();
+assert.equal(await page.getByLabel('Start audio time',{exact:true}).inputValue(),'0.50');
+assert.equal(await page.getByLabel('End audio time',{exact:true}).inputValue(),'4.00');
+assert.equal(await page.locator('.hold-marker').count(),1);
+await seekTo(1.1);await page.locator('#preview-mapping').click();
+await page.waitForTimeout(300);assert.equal(await pixels(),chosen);await page.locator('#play').click();
+await page.locator('#export').click();await page.locator('#start-export').click();
+await page.locator('#download').waitFor({state:'visible',timeout:20000});await page.locator('.close').click();
+await page.getByLabel('Delete point 1',{exact:true}).click();
 assert.equal(await page.locator('#duration').inputValue(),'4.00');
-assert.equal(await page.locator('.break-marker').count(),0);
-assert.deepEqual(errors,[]);console.log('Browser checks passed: drawing, undo/redo, both timing modes, continuous holds and resume, save/load, silent/audio WebM export.');
+assert.deepEqual(errors,[]);console.log('Browser checks passed: drawing, undo/redo, both timing modes, independent drawing/audio cursors, linked timing points, holds and resume, save/load, silent/audio WebM export.');
 }finally{await browser?.close();server.kill();}
